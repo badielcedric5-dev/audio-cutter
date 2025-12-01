@@ -5,6 +5,14 @@ export interface AudioFile {
   buffer?: AudioBuffer;
 }
 
+export interface Track {
+  id: string;
+  name: string;
+  blob: Blob;
+  buffer: AudioBuffer;
+  isMuted: boolean;
+}
+
 export enum AnalysisType {
   TRANSCRIPTION = 'Transcription',
   SUMMARY = 'Résumé',
@@ -13,6 +21,7 @@ export enum AnalysisType {
 }
 
 export interface AnalysisResult {
+  trackName: string;
   type: AnalysisType;
   text: string;
 }
@@ -22,3 +31,5 @@ export interface ToastMessage {
   message: string;
   type: 'success' | 'error' | 'info';
 }
+
+export type ChannelMode = 'left' | 'right' | 'stereo';
