@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Activity, Plus, Music } from 'lucide-react';
+import { Upload, Activity, Plus, Music, Download, Settings, FileAudio } from 'lucide-react';
 import WaveformEditor, { WaveformEditorRef } from './components/WaveformEditor';
-import { decodeAudio, cutAudioRegion, extractAudioRegion, blobToBase64, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects } from './utils/audioUtils';
+import { decodeAudio, cutAudioRegion, extractAudioRegion, blobToBase64, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects, mixAllTracks, exportAudio } from './utils/audioUtils';
 import { analyzeAudio } from './services/geminiService';
-import { AnalysisType, AnalysisResult, Track, ChannelMode } from './types';
+import { AnalysisType, AnalysisResult, Track, ChannelMode, ExportFormat } from './types';
 import { X } from 'lucide-react';
 import { Sparkles } from 'lucide-react';
 
@@ -12,8 +12,10 @@ const WORKSPACE_PADDING_SECONDS = 300;
 function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [selectedAnalysisType, setSelectedAnalysisType] = useState<AnalysisType>(AnalysisType.TRANSCRIPTION);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('wav');
   
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
   
@@ -169,6 +171,7 @@ function App() {
     try {
       const ctx = getAudioContext();
       const arrayBuffer = await file.arrayBuffer();
+      // DecodeAudioData automatically supports MP3, WAV, OGG, M4A, AAC, etc.
       const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
       const paddedBuffer = padAudioBuffer(decodedBuffer, ctx, WORKSPACE_PADDING_SECONDS);
       const paddedBlob = bufferToWave(paddedBuffer, paddedBuffer.length);
@@ -185,7 +188,7 @@ function App() {
       setFocusedTrackId(newTrack.id);
     } catch (error) {
       console.error("Error adding track:", error);
-      alert("Impossible de charger le fichier audio.");
+      alert("Erreur: Format audio non supporté ou fichier corrompu.");
     } finally {
       setIsProcessing(false);
       if (addTrackInputRef.current) addTrackInputRef.current.value = '';
@@ -341,10 +344,6 @@ function App() {
                       
                       if (insertMode === 'stereo') {
                           // Logic for inserting recording into stereo mix (overwrite at position)
-                          // We treat this as an overwrite/mix-in similar to pasteAudioToChannel but across both channels
-                          // For simplicity, we can use the manual overwrite logic we had, or adapt pasteAudioToChannel
-                          // Let's stick to the robust logic we built:
-                          
                           const rate = targetTrack.buffer.sampleRate;
                           const startFrame = Math.floor(insertTime * rate);
                           const endFrame = startFrame + recordedBuffer.length;
@@ -398,9 +397,67 @@ function App() {
       }
   };
 
+  const handleExport = async () => {
+    if (tracks.length === 0) return;
+    
+    // For WAV and MP3, processing is done in JS
+    // For WebM/MP4, it involves playback, so we show a dedicated "Exporting" state
+    if (exportFormat === 'wav' || exportFormat === 'mp3') {
+        setIsProcessing(true);
+    } else {
+        setIsExporting(true);
+    }
+
+    try {
+        const ctx = getAudioContext();
+        const mixedBuffer = mixAllTracks(tracks, ctx);
+        
+        let blob: Blob;
+        let ext = exportFormat;
+
+        // Use the dedicated export function that handles dispatching
+        blob = await exportAudio(mixedBuffer, exportFormat, ctx);
+        
+        // Browser fallback check for webm vs mp4
+        if (exportFormat === 'mp4' && blob.type.includes('webm')) ext = 'webm';
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `projet_audio_${new Date().toISOString().slice(0,10)}.${ext}`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch(e) {
+        console.error("Export failed", e);
+        alert("L'exportation a échoué.");
+    } finally {
+        setIsProcessing(false);
+        setIsExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col font-sans selection:bg-primary/30 pb-20">
       
+      {/* Export Loader Overlay */}
+      {isExporting && (
+          <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center backdrop-blur-sm">
+              <div className="bg-surface p-8 rounded-2xl border border-primary/20 shadow-2xl flex flex-col items-center gap-6 max-w-sm text-center">
+                  <div className="relative">
+                      <div className="w-16 h-16 border-4 border-primary/30 border-t-primary rounded-full animate-spin"></div>
+                      <Download className="absolute inset-0 m-auto text-primary" size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-2">Exportation en cours...</h3>
+                    <p className="text-gray-400 text-sm">
+                        Conversion au format {exportFormat.toUpperCase()}.<br/>
+                        Veuillez patienter, cela peut prendre la durée de l'audio.
+                    </p>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <input 
           type="file" 
           accept="audio/*" 
@@ -432,9 +489,38 @@ function App() {
                      Audio copié
                  </span>
              )}
+            {tracks.length > 0 && (
+                <div className="flex items-center bg-secondary rounded-full p-0.5 border border-white/10">
+                    <div className="relative">
+                        <select 
+                            value={exportFormat}
+                            onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
+                            className="bg-transparent text-xs text-gray-300 pl-3 pr-8 py-2 outline-none appearance-none cursor-pointer hover:text-white transition-colors uppercase font-bold"
+                        >
+                            <option value="wav" className="bg-surface text-gray-300">WAV (HQ)</option>
+                            <option value="mp3" className="bg-surface text-gray-300">MP3 (Compressed)</option>
+                            <option value="mp4" className="bg-surface text-gray-300">MP4 (AAC)</option>
+                            <option value="webm" className="bg-surface text-gray-300">WEBM</option>
+                        </select>
+                        <Settings className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500" size={12} />
+                    </div>
+                    <button 
+                        onClick={handleExport}
+                        className="flex items-center gap-2 text-sm bg-primary hover:bg-primary/90 text-white px-4 py-1.5 rounded-full transition shadow-lg"
+                        title="Télécharger"
+                    >
+                        {isProcessing ? (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                            <Download size={16} />
+                        )}
+                        <span className="hidden sm:inline">Exporter</span>
+                    </button>
+                </div>
+            )}
             <button 
                 onClick={() => addTrackInputRef.current?.click()}
-                className="flex items-center gap-2 text-sm bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full transition shadow-lg shadow-primary/20"
+                className="flex items-center gap-2 text-sm bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full transition border border-white/5"
             >
                 <Plus size={16} />
                 Nouvelle Piste
@@ -452,7 +538,7 @@ function App() {
             </div>
             <h2 className="text-2xl font-bold mb-2 text-center">Commencez votre projet</h2>
             <p className="text-gray-400 mb-8 text-center max-w-md">
-              Ajoutez votre première piste audio pour commencer l'édition.
+              Ajoutez votre première piste audio (MP3, WAV, AAC, OGG...) pour commencer l'édition.
               <br/>
               <span className="text-sm mt-2 block text-gray-500">Raccourcis : Espace, Ctrl+C/V/X, Suppr</span>
             </p>
@@ -501,6 +587,7 @@ function App() {
                 >
                     <Plus size={20} />
                     Ajouter une autre piste
+                    <span className="text-xs bg-white/10 px-2 py-0.5 rounded text-gray-400">Tous formats supportés</span>
                 </button>
             </div>
 

@@ -33,3 +33,5 @@ export interface ToastMessage {
 }
 
 export type ChannelMode = 'left' | 'right' | 'stereo';
+
+export type ExportFormat = 'wav' | 'webm' | 'mp4' | 'mp3';

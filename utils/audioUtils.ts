@@ -1,4 +1,6 @@
-import { ChannelMode } from "../types";
+import { ChannelMode, ExportFormat } from "../types";
+// @ts-ignore
+import lamejs from 'lamejs';
 
 /**
  * Decodes a Blob into an AudioBuffer.
@@ -434,6 +436,84 @@ export const applyAudioEffects = (
     return newBuffer;
 };
 
+/**
+ * Mixes all tracks into a single AudioBuffer.
+ */
+export const mixAllTracks = (
+    tracks: { buffer: AudioBuffer; isMuted: boolean }[],
+    audioContext: AudioContext
+): AudioBuffer => {
+    // 1. Find max duration among unmuted tracks
+    let maxLength = 0;
+    tracks.forEach(t => {
+        if (!t.isMuted && t.buffer.length > maxLength) {
+            maxLength = t.buffer.length;
+        }
+    });
+
+    if (maxLength === 0) {
+        return audioContext.createBuffer(2, 1, audioContext.sampleRate);
+    }
+
+    // Always create stereo output for the mix
+    // Create a temp buffer with the FULL length (including possible padding)
+    const tempBuffer = audioContext.createBuffer(2, maxLength, audioContext.sampleRate);
+    const leftOut = tempBuffer.getChannelData(0);
+    const rightOut = tempBuffer.getChannelData(1);
+
+    // 2. Sum tracks
+    tracks.forEach(t => {
+        if (t.isMuted) return;
+        
+        const buffer = t.buffer;
+        // Get channel data (if mono, duplicate to R)
+        const leftIn = buffer.getChannelData(0);
+        const rightIn = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : buffer.getChannelData(0);
+
+        // Add to output
+        // We iterate only up to the track's length to save cycles
+        const len = buffer.length;
+        for (let i = 0; i < len; i++) {
+            leftOut[i] += leftIn[i];
+            rightOut[i] += rightIn[i];
+        }
+    });
+
+    // 3. Hard Clip Limiter to prevent nasty wrapping distortion
+    // And simultaneously detect the last non-silent frame
+    let lastNonZeroFrame = 0;
+
+    for (let i = 0; i < maxLength; i++) {
+        // Limiter
+        if (leftOut[i] > 1) leftOut[i] = 1;
+        if (leftOut[i] < -1) leftOut[i] = -1;
+        
+        if (rightOut[i] > 1) rightOut[i] = 1;
+        if (rightOut[i] < -1) rightOut[i] = -1;
+
+        // Silence detection
+        // Threshold of 0.0001 is standard to ignore floating point noise
+        if (Math.abs(leftOut[i]) > 0.0001 || Math.abs(rightOut[i]) > 0.0001) {
+            lastNonZeroFrame = i;
+        }
+    }
+
+    // 4. TRIM SILENCE
+    // We trim the buffer to the last non-silent frame + a small margin (e.g., 0.5s) to avoid abrupt cuts
+    // But we ensure we don't exceed the original buffer
+    const trimEnd = Math.min(maxLength, lastNonZeroFrame + Math.floor(audioContext.sampleRate * 0.5));
+    
+    if (trimEnd === 0) {
+        return audioContext.createBuffer(2, 1, audioContext.sampleRate);
+    }
+
+    const finalBuffer = audioContext.createBuffer(2, trimEnd, audioContext.sampleRate);
+    finalBuffer.getChannelData(0).set(leftOut.subarray(0, trimEnd));
+    finalBuffer.getChannelData(1).set(rightOut.subarray(0, trimEnd));
+
+    return finalBuffer;
+};
+
 export const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -448,4 +528,110 @@ export const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+};
+
+/**
+ * Encodes audio buffer to MP3 using lamejs
+ */
+export const bufferToMp3 = (buffer: AudioBuffer): Blob => {
+    const channels = buffer.numberOfChannels || 1;
+    const sampleRate = buffer.sampleRate;
+    const kbps = 128; // Standard quality
+    
+    const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+    const mp3Data = [];
+
+    // Convert Float32 to Int16
+    const leftData = buffer.getChannelData(0);
+    const rightData = channels > 1 ? buffer.getChannelData(1) : undefined;
+    
+    // We process in chunks to avoid blowing up memory if sample is huge, 
+    // although for simplicity here we assume reasonable size or do one pass.
+    // LameJS expects Int16Array.
+    
+    const samples = new Int16Array(leftData.length);
+    for(let i=0; i<leftData.length; i++) {
+        let s = Math.max(-1, Math.min(1, leftData[i]));
+        samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    
+    let rightSamples: Int16Array | undefined;
+    if (rightData) {
+        rightSamples = new Int16Array(rightData.length);
+        for(let i=0; i<rightData.length; i++) {
+            let s = Math.max(-1, Math.min(1, rightData[i]));
+            rightSamples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+    }
+
+    // Encode
+    const mp3buf = mp3encoder.encodeBuffer(samples, rightSamples);
+    if (mp3buf.length > 0) {
+        mp3Data.push(mp3buf);
+    }
+    
+    const endBuf = mp3encoder.flush();
+    if (endBuf.length > 0) {
+        mp3Data.push(endBuf);
+    }
+
+    return new Blob(mp3Data, { type: 'audio/mp3' });
+};
+
+/**
+ * Encodes audio buffer to requested format.
+ * WAV and MP3 are done purely in JS/WASM.
+ * WebM and MP4 use MediaRecorder real-time encoding fallback.
+ */
+export const exportAudio = async (
+    buffer: AudioBuffer,
+    format: ExportFormat,
+    audioContext: AudioContext
+): Promise<Blob> => {
+    if (format === 'wav') {
+        return bufferToWave(buffer, buffer.length);
+    }
+
+    if (format === 'mp3') {
+        return bufferToMp3(buffer);
+    }
+
+    // Fallback for WebM / MP4 via MediaRecorder (Playback-based)
+    const dest = audioContext.createMediaStreamDestination();
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(dest);
+
+    // Determine mimeType
+    let mimeType = 'audio/webm';
+    if (format === 'mp4' && MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+    } else if (format === 'mp4' && MediaRecorder.isTypeSupported('audio/webm')) {
+        console.warn("MP4 not supported natively, falling back to WebM container");
+        mimeType = 'audio/webm';
+    }
+
+    const recorder = new MediaRecorder(dest.stream, { mimeType });
+    const chunks: Blob[] = [];
+
+    return new Promise((resolve, reject) => {
+        recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: mimeType });
+            resolve(blob);
+        };
+
+        recorder.onerror = (e) => reject(e);
+
+        recorder.start();
+        source.start();
+        
+        // Stop recording when playback finishes
+        source.onended = () => {
+            recorder.stop();
+        };
+    });
 };

@@ -13,7 +13,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "lucide-react": "^0.555.0",
-    "wavesurfer.js": "^7.11.1"
+    "wavesurfer.js": "^7.11.1",
+    "lamejs": "1.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
