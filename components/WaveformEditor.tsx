@@ -3,7 +3,7 @@ import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
 import ZoomPlugin from 'wavesurfer.js/dist/plugins/zoom.esm.js';
-import { Play, Pause, ZoomIn, ZoomOut, Wand2, Trash2, PlusCircle, XCircle, Volume2, Headphones, Check, Layers, Mic, Square } from 'lucide-react';
+import { Play, Pause, ZoomIn, ZoomOut, Trash2, PlusCircle, XCircle, Volume2, Headphones, Check, Mic, Square } from 'lucide-react';
 import { ChannelMode } from '../types';
 
 export interface WaveformEditorRef {
@@ -21,7 +21,6 @@ interface WaveformEditorProps {
     audioBlob: Blob; // Used for playback source
     audioBuffer: AudioBuffer; // Used for immediate visual rendering
     onUpdateBlob: (newBlob: Blob) => void;
-    onExtractRegion: (start: number, end: number, channelMode: ChannelMode) => void;
     onCutRegion?: (start: number, end: number, channelMode: ChannelMode) => void;
     onAppendAudio?: () => void;
     onRemoveTrack?: () => void;
@@ -38,7 +37,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
     trackName,
     audioBlob, 
     audioBuffer,
-    onExtractRegion,
     onCutRegion,
     onAppendAudio,
     onRemoveTrack,
@@ -118,7 +116,7 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
             cursorColor: '#f4f4f5',
             barWidth: 2,
             barGap: 3,
-            height: 140,
+            height: 64, // Compact height (32px per channel)
             autoScroll: true,
             minPxPerSec: zoom,
             normalize: true,
@@ -152,6 +150,7 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
             setActiveRegion(null);
             setVolume(1);
             setPan(0);
+            setChannelMode('stereo'); // Reset to stereo on new click
         });
 
         wsRegions.on('region-created', (region) => {
@@ -178,8 +177,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
 
         wsRegions.on('region-removed', (region) => {
             // Only clear active region if it matches the removed one
-            // Use the ref inside this callback to ensure we check against latest state logic if needed,
-            // but setState updater is safer.
             setActiveRegion(prev => (prev?.id === region.id ? null : prev));
         });
 
@@ -213,10 +210,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
         
         // Load new data (this clears regions internally in wavesurfer)
         ws.load(url, channelData);
-
-        // We do NOT explicitly set ActiveRegion to null here.
-        // The 'region-removed' event listener will fire as wavesurfer clears regions.
-        // However, we have `savedRegion` in this closure to restore it.
 
         // Restore position and region after load
         ws.once('ready', () => {
@@ -266,10 +259,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
     const handleDeleteRegion = () => {
         if (activeRegion && onCutRegion) {
             onCutRegion(activeRegion.start, activeRegion.end, channelMode);
-            // We don't manually clear regions here; let the buffer update loop handle the restoration if logic dictates,
-            // but for a CUT, usually we want the selection to disappear or adjust. 
-            // Standard behavior: Cut removes the audio, so the selection becomes invalid or 0-length.
-            // So we explicitly clear activeRegionRef here to prevent restoration of a deleted zone.
             activeRegionRef.current = null; 
             regionsRef.current?.clearRegions();
             setActiveRegion(null);
@@ -305,21 +294,21 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
     return (
         <div 
             onClick={onFocus}
-            className={`flex flex-col gap-3 bg-surface p-4 rounded-xl shadow-lg transition-all duration-200 ${
+            className={`flex flex-col gap-1 bg-surface p-2 rounded-xl shadow-lg transition-all duration-200 ${
                 isFocused 
                 ? 'border-2 border-primary/50 ring-1 ring-primary/20' 
                 : 'border border-secondary hover:border-secondary/80'
             }`}
         >
             {/* Header */}
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded transition-colors ${isFocused ? 'bg-primary text-white' : 'bg-primary/20 text-primary'}`}>
-                        <Play size={14} />
+                    <div className={`p-1 rounded transition-colors ${isFocused ? 'bg-primary text-white' : 'bg-primary/20 text-primary'}`}>
+                        <Play size={12} />
                     </div>
-                    <span className="font-medium text-sm text-gray-200 truncate max-w-[200px]" title={trackName}>{trackName}</span>
-                    {isFocused && <span className="text-[10px] bg-primary/20 text-primary px-1.5 rounded ml-2">ACTIF</span>}
-                    {isRecording && <span className="text-[10px] bg-red-500/20 text-red-500 px-1.5 rounded ml-2 animate-pulse">ENREGISTREMENT</span>}
+                    <span className="font-medium text-xs text-gray-200 truncate max-w-[200px]" title={trackName}>{trackName}</span>
+                    {isFocused && <span className="text-[9px] bg-primary/20 text-primary px-1.5 rounded ml-2">ACTIF</span>}
+                    {isRecording && <span className="text-[9px] bg-red-500/20 text-red-500 px-1.5 rounded ml-2 animate-pulse">ENREGISTREMENT</span>}
                 </div>
                 {onRemoveTrack && (
                     <button 
@@ -327,78 +316,78 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
                             e.stopPropagation();
                             onRemoveTrack();
                         }}
-                        className="text-gray-400 hover:text-red-400 hover:bg-red-500/10 p-1.5 rounded transition-colors"
+                        className="text-gray-400 hover:text-red-400 hover:bg-red-500/10 p-1 rounded transition-colors"
                         title="Supprimer la piste"
                     >
-                        <XCircle size={20} />
+                        <XCircle size={16} />
                     </button>
                 )}
             </div>
 
             {/* Waveform */}
-            <div className="relative group min-h-[140px] bg-black/40 rounded-lg overflow-hidden border border-white/5">
-                <div className="absolute left-1 top-2 text-[10px] text-red-400 font-bold z-10 pointer-events-none opacity-50">L</div>
-                <div className="absolute left-1 bottom-2 text-[10px] text-cyan-400 font-bold z-10 pointer-events-none opacity-50">R</div>
+            <div className="relative group min-h-[64px] bg-black/40 rounded-lg overflow-hidden border border-white/5">
+                <div className="absolute left-1 top-1 text-[8px] text-red-400 font-bold z-10 pointer-events-none opacity-50">L</div>
+                <div className="absolute left-1 bottom-1 text-[8px] text-cyan-400 font-bold z-10 pointer-events-none opacity-50">R</div>
 
                 <div id={`waveform-${trackId}`} ref={containerRef} className="w-full" />
                 {(!isReady || isProcessing) && (
                     <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 backdrop-blur-sm">
                         <div className="flex flex-col items-center gap-2">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
                         </div>
                     </div>
                 )}
             </div>
 
             {/* Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
                 <div className="flex items-center gap-2">
                     <button 
                         onClick={(e) => { e.stopPropagation(); handlePlayPause(); }}
                         disabled={!isReady}
-                        className="p-2 rounded-full bg-primary hover:bg-violet-600 disabled:opacity-50 text-white transition-all shadow"
+                        className="p-1 rounded-full bg-primary hover:bg-violet-600 disabled:opacity-50 text-white transition-all shadow"
                     >
-                        {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+                        {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
                     </button>
-                    <span className="text-xs text-gray-400 font-mono ml-1 w-12">
+                    <span className="text-[10px] text-gray-400 font-mono ml-1 w-10">
                         {formatTime(currentTime)}
                     </span>
                     
-                    <div className="flex items-center gap-1 bg-black/20 p-0.5 rounded-lg ml-2">
+                    <div className="flex items-center gap-0.5 bg-black/20 p-0.5 rounded-lg ml-2">
                         <button 
                             onClick={(e) => { e.stopPropagation(); setZoom(z => Math.max(1, z - 10)); }}
                             disabled={!isReady}
-                            className="p-1.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
+                            className="p-0.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
                         >
-                            <ZoomOut size={14} />
+                            <ZoomOut size={10} />
                         </button>
                         <button 
                             onClick={(e) => { e.stopPropagation(); setZoom(z => Math.min(200, z + 10)); }}
                             disabled={!isReady}
-                            className="p-1.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
+                            className="p-0.5 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
                         >
-                            <ZoomIn size={14} />
+                            <ZoomIn size={10} />
                         </button>
                     </div>
 
                     <div className="flex items-center bg-black/40 rounded p-0.5 ml-2">
                         <button
                             onClick={(e) => { e.stopPropagation(); setChannelMode('left'); }}
-                            className={`px-2 py-1 text-[10px] font-bold rounded ${channelMode === 'left' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'}`}
+                            className={`px-1 py-0.5 text-[8px] font-bold rounded ${channelMode === 'left' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'}`}
                             title="Canal Gauche (Haut)"
                         >
                             L
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); setChannelMode('stereo'); }}
-                            className={`px-2 py-1 text-[10px] font-bold rounded ${channelMode === 'stereo' ? 'bg-violet-500 text-white' : 'text-gray-400 hover:text-white'}`}
+                            className={`px-1 py-0.5 text-[8px] font-bold rounded ${channelMode === 'stereo' ? 'bg-violet-500 text-white' : 'text-gray-400 hover:text-white'}`}
                             title="Stéréo (L+R)"
                         >
                             L+R
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); setChannelMode('right'); }}
-                            className={`px-2 py-1 text-[10px] font-bold rounded ${channelMode === 'right' ? 'bg-cyan-500 text-white' : 'text-gray-400 hover:text-white'}`}
+                            className={`px-1 py-0.5 text-[8px] font-bold rounded ${channelMode === 'right' ? 'bg-cyan-500 text-white' : 'text-gray-400 hover:text-white'}`}
                             title="Canal Droit (Bas)"
                         >
                             R
@@ -407,14 +396,14 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
 
                     <button
                         onClick={(e) => { e.stopPropagation(); handleRecordClick(); }}
-                        className={`ml-2 p-1.5 rounded-full transition-all ${
+                        className={`ml-2 p-1 rounded-full transition-all ${
                             isRecording 
                             ? 'bg-red-500 text-white animate-pulse' 
                             : 'bg-secondary/50 text-red-400 hover:bg-red-500 hover:text-white'
                         }`}
                         title={isRecording ? "Arrêter l'enregistrement" : "Enregistrer ici"}
                     >
-                        {isRecording ? <Square size={14} fill="currentColor" /> : <Mic size={14} />}
+                        {isRecording ? <Square size={10} fill="currentColor" /> : <Mic size={10} />}
                     </button>
                 </div>
 
@@ -422,31 +411,31 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
                     <button 
                         onClick={(e) => { e.stopPropagation(); onAppendAudio?.(); }}
                         disabled={isProcessing}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary hover:bg-white/10 text-white transition-all border border-transparent hover:border-white/10"
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-secondary hover:bg-white/10 text-white transition-all border border-transparent hover:border-white/10"
                     >
-                        <PlusCircle size={14} />
+                        <PlusCircle size={10} />
                         <span className="hidden sm:inline">Suite</span>
                     </button>
                     
                     {activeRegion ? (
-                        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2 bg-primary/10 border border-primary/20 px-2 py-1 rounded-lg">
+                        <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-right-2 bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded-lg">
                             <button
                                 onClick={(e) => { e.stopPropagation(); handleRecordClick(); }}
-                                className={`p-1.5 rounded transition-all ${
+                                className={`p-0.5 rounded transition-all ${
                                     isRecording 
                                     ? 'bg-red-500 text-white' 
                                     : 'hover:bg-red-500/20 text-red-400'
                                 }`}
                                 title="Enregistrer sur la sélection"
                             >
-                                {isRecording ? <Square size={14} fill="currentColor" /> : <Mic size={14} />}
+                                {isRecording ? <Square size={10} fill="currentColor" /> : <Mic size={10} />}
                             </button>
 
-                            <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
+                            <div className="w-[1px] h-3 bg-white/10 mx-0.5"></div>
 
-                            <div className="flex flex-col w-16 px-1">
-                                <div className="flex justify-between items-center text-[10px] text-gray-400">
-                                    <Volume2 size={10} />
+                            <div className="flex flex-col w-12 px-0.5">
+                                <div className="flex justify-between items-center text-[7px] text-gray-400">
+                                    <Volume2 size={7} />
                                     <span>{Math.round(volume * 100)}%</span>
                                 </div>
                                 <input 
@@ -458,9 +447,9 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
                                     className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary"
                                 />
                             </div>
-                            <div className="flex flex-col w-16 px-1">
-                                <div className="flex justify-between items-center text-[10px] text-gray-400">
-                                    <Headphones size={10} />
+                            <div className="flex flex-col w-12 px-0.5">
+                                <div className="flex justify-between items-center text-[7px] text-gray-400">
+                                    <Headphones size={7} />
                                     <span>Pan</span>
                                 </div>
                                 <input 
@@ -475,30 +464,23 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
 
                             <button
                                 onClick={(e) => { e.stopPropagation(); handleApplyEffects(); }}
-                                className="p-1.5 bg-green-500/20 text-green-400 hover:bg-green-500 hover:text-white rounded transition-colors"
+                                className="p-0.5 bg-green-500/20 text-green-400 hover:bg-green-500 hover:text-white rounded transition-colors"
                             >
-                                <Check size={14} />
+                                <Check size={10} />
                             </button>
 
-                            <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
+                            <div className="w-[1px] h-3 bg-white/10 mx-0.5"></div>
 
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleDeleteRegion(); }}
-                                className="p-1.5 hover:bg-red-500/20 text-red-400 rounded transition-colors"
+                                className="p-0.5 hover:bg-red-500/20 text-red-400 rounded transition-colors"
                                 title="Couper / Supprimer"
                             >
-                                <Trash2 size={14} />
-                            </button>
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); if(activeRegion) onExtractRegion(activeRegion.start, activeRegion.end, channelMode); }}
-                                className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded transition-colors"
-                                title="Analyser"
-                            >
-                                <Wand2 size={14} />
+                                <Trash2 size={10} />
                             </button>
                         </div>
                     ) : (
-                         <div className="w-2"></div>
+                         <div className="w-1"></div>
                     )}
                 </div>
             </div>

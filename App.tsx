@@ -2,10 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Activity, Plus, Music, Download, Settings, FileAudio } from 'lucide-react';
 import WaveformEditor, { WaveformEditorRef } from './components/WaveformEditor';
 import { decodeAudio, cutAudioRegion, extractAudioRegion, blobToBase64, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects, mixAllTracks, exportAudio } from './utils/audioUtils';
-import { analyzeAudio } from './services/geminiService';
-import { AnalysisType, AnalysisResult, Track, ChannelMode, ExportFormat } from './types';
-import { X } from 'lucide-react';
-import { Sparkles } from 'lucide-react';
+import { Track, ChannelMode, ExportFormat } from './types';
 
 const WORKSPACE_PADDING_SECONDS = 300; 
 
@@ -13,8 +10,6 @@ function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [selectedAnalysisType, setSelectedAnalysisType] = useState<AnalysisType>(AnalysisType.TRANSCRIPTION);
   const [exportFormat, setExportFormat] = useState<ExportFormat>('wav');
   
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
@@ -266,38 +261,6 @@ function App() {
       setTracks(prev => prev.filter(t => t.id !== trackId));
       trackRefs.current.delete(trackId);
       if (focusedTrackId === trackId) setFocusedTrackId(null);
-  };
-
-  const handleAnalyzeRegion = async (trackId: string, start: number, end: number, mode: ChannelMode) => {
-    const track = tracks.find(t => t.id === trackId);
-    if (!track) return;
-
-    setFocusedTrackId(trackId);
-    setIsProcessing(true);
-    setAnalysisResult(null); 
-
-    try {
-        const ctx = getAudioContext();
-        const regionBuffer = extractAudioRegion(track.buffer, start, end, mode, ctx);
-        const regionBlob = bufferToWave(regionBuffer, regionBuffer.length);
-        const base64 = await blobToBase64(regionBlob);
-        
-        const text = await analyzeAudio(base64, selectedAnalysisType);
-        setAnalysisResult({ 
-            trackName: track.name,
-            type: selectedAnalysisType, 
-            text 
-        });
-    } catch (error) {
-        console.error("Analysis failed", error);
-        setAnalysisResult({ 
-            trackName: track.name,
-            type: selectedAnalysisType, 
-            text: "Erreur lors de l'analyse." 
-        });
-    } finally {
-        setIsProcessing(false);
-    }
   };
 
   const handleRecordToggle = async (trackId: string, start: number, _end: number | null, mode: ChannelMode) => {
@@ -553,12 +516,12 @@ function App() {
         )}
 
         {tracks.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
             
-            <div className="lg:col-span-2 flex flex-col gap-4">
+            <div className="flex flex-col gap-4">
                 {tracks.map((track) => (
                     <WaveformEditor 
-                        key={track.id} // REMOVED track.blob.size to prevent full re-mount on edit
+                        key={track.id}
                         ref={(el) => {
                             if (el) trackRefs.current.set(track.id, el);
                             else trackRefs.current.delete(track.id);
@@ -568,7 +531,6 @@ function App() {
                         audioBlob={track.blob}
                         audioBuffer={track.buffer}
                         onUpdateBlob={() => {}}
-                        onExtractRegion={(s, e, m) => handleAnalyzeRegion(track.id, s, e, m)}
                         onCutRegion={(s, e, m) => handleCutRegion(track.id, s, e, m)}
                         onAppendAudio={() => triggerAppend(track.id)}
                         onRemoveTrack={() => handleRemoveTrack(track.id)}
@@ -590,68 +552,6 @@ function App() {
                     <span className="text-xs bg-white/10 px-2 py-0.5 rounded text-gray-400">Tous formats supportés</span>
                 </button>
             </div>
-
-            <div className="lg:col-span-1">
-                <div className="bg-surface border border-secondary rounded-xl p-6 flex flex-col gap-6 h-fit sticky top-24">
-                    <div className="flex items-center gap-2 mb-2">
-                        <Sparkles className="text-amber-400" size={20} />
-                        <h2 className="text-lg font-semibold">Analyse Gemini</h2>
-                    </div>
-
-                    <div className="space-y-4">
-                        <label className="block text-sm font-medium text-gray-400 mb-2">Type d'analyse</label>
-                        <div className="grid grid-cols-2 gap-2">
-                            {Object.values(AnalysisType).map((type) => (
-                                <button
-                                    key={type}
-                                    onClick={() => setSelectedAnalysisType(type)}
-                                    className={`px-3 py-2 rounded-lg text-sm text-left transition-all border ${
-                                        selectedAnalysisType === type 
-                                        ? 'bg-primary/20 border-primary text-white' 
-                                        : 'bg-black/20 border-transparent hover:bg-black/40 text-gray-400'
-                                    }`}
-                                >
-                                    {type}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="min-h-[200px] bg-black/20 rounded-lg p-4 border border-secondary overflow-y-auto max-h-[calc(100vh-300px)]">
-                        {analysisResult && (
-                            <div className="animate-in fade-in zoom-in-95">
-                                <div className="flex flex-col gap-1 mb-3 border-b border-white/10 pb-2">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold text-primary uppercase tracking-wider">
-                                            {analysisResult.type}
-                                        </span>
-                                        <button onClick={() => setAnalysisResult(null)} className="text-gray-500 hover:text-white">
-                                            <X size={14} />
-                                        </button>
-                                    </div>
-                                    <span className="text-xs text-gray-500 italic">
-                                        Source : {analysisResult.trackName}
-                                    </span>
-                                </div>
-                                <p className="text-sm leading-relaxed whitespace-pre-line text-gray-200">
-                                    {analysisResult.text}
-                                </p>
-                            </div>
-                        )}
-                        {!analysisResult && !isProcessing && (
-                            <div className="text-gray-500 text-center py-8 text-sm">
-                                Sélectionnez une zone et cliquez sur l'icône baguette magique.
-                            </div>
-                        )}
-                         {isProcessing && !analysisResult && (
-                            <div className="flex justify-center py-8">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
-
           </div>
         )}
       </main>
