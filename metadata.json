@@ -1,6 +1,6 @@
 {
-  "name": "Copy of AudioStudio AI",
-  "description": "Une suite d'édition audio puissante permettant la découpe, la retouche et l'analyse intelligente grâce à Gemini. Visualisez vos ondes sonores et modifiez-les en toute simplicité.",
+  "name": "AudioStudio",
+  "description": "Une suite d'édition audio puissante permettant la découpe, le mixage et l'enregistrement multi-pistes. Visualisez vos ondes sonores et modifiez-les en toute simplicité.",
   "requestFramePermissions": [
     "microphone"
   ]

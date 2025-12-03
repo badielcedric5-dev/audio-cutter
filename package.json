@@ -1,5 +1,5 @@
 {
-  "name": "copy-of-audiostudio-ai",
+  "name": "audiostudio",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,12 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.30.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "lucide-react": "^0.555.0",
     "wavesurfer.js": "^7.11.1",
-    "lamejs": "1.2.1"
+    "@ffmpeg/ffmpeg": "0.12.10",
+    "@ffmpeg/util": "0.12.1",
+    "@ffmpeg/core": "0.12.6"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

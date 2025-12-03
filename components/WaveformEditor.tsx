@@ -125,9 +125,12 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
             barGap: 3,
             height: 64, // Compact height
             autoScroll: true,
+            autoCenter: false, // Performance optimization: prevents camera jumping
             minPxPerSec: zoom,
             normalize: true,
             splitChannels: true,
+            pixelRatio: 1, // Performance optimization: standard DPI rendering for speed
+            sampleRate: 8000, // Performance optimization: reduces data points to render
         });
 
         const wsRegions = ws.registerPlugin(RegionsPlugin.create());

@@ -1,6 +1,27 @@
 import { ChannelMode, ExportFormat } from "../types";
-// @ts-ignore
-import lamejs from 'lamejs';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
+
+let ffmpegInstance: FFmpeg | null = null;
+
+/**
+ * Loads FFmpeg instance (Singleton)
+ */
+const loadFFmpeg = async () => {
+    if (ffmpegInstance) return ffmpegInstance;
+    
+    const ffmpeg = new FFmpeg();
+    
+    // We need to load core. 
+    // Using standard esm.sh URLs for the core files
+    await ffmpeg.load({
+        coreURL: 'https://esm.sh/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
+        wasmURL: 'https://esm.sh/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
+    });
+    
+    ffmpegInstance = ffmpeg;
+    return ffmpeg;
+};
 
 /**
  * Decodes a Blob into an AudioBuffer.
@@ -531,107 +552,87 @@ export const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 /**
- * Encodes audio buffer to MP3 using lamejs
- */
-export const bufferToMp3 = (buffer: AudioBuffer): Blob => {
-    const channels = buffer.numberOfChannels || 1;
-    const sampleRate = buffer.sampleRate;
-    const kbps = 128; // Standard quality
-    
-    const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
-    const mp3Data = [];
-
-    // Convert Float32 to Int16
-    const leftData = buffer.getChannelData(0);
-    const rightData = channels > 1 ? buffer.getChannelData(1) : undefined;
-    
-    // We process in chunks to avoid blowing up memory if sample is huge, 
-    // although for simplicity here we assume reasonable size or do one pass.
-    // LameJS expects Int16Array.
-    
-    const samples = new Int16Array(leftData.length);
-    for(let i=0; i<leftData.length; i++) {
-        let s = Math.max(-1, Math.min(1, leftData[i]));
-        samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    
-    let rightSamples: Int16Array | undefined;
-    if (rightData) {
-        rightSamples = new Int16Array(rightData.length);
-        for(let i=0; i<rightData.length; i++) {
-            let s = Math.max(-1, Math.min(1, rightData[i]));
-            rightSamples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
-    }
-
-    // Encode
-    const mp3buf = mp3encoder.encodeBuffer(samples, rightSamples);
-    if (mp3buf.length > 0) {
-        mp3Data.push(mp3buf);
-    }
-    
-    const endBuf = mp3encoder.flush();
-    if (endBuf.length > 0) {
-        mp3Data.push(endBuf);
-    }
-
-    return new Blob(mp3Data, { type: 'audio/mp3' });
-};
-
-/**
  * Encodes audio buffer to requested format.
- * WAV and MP3 are done purely in JS/WASM.
- * WebM and MP4 use MediaRecorder real-time encoding fallback.
+ * WAV is done pure JS.
+ * MP3, MP4, WebM are converted via FFmpeg.wasm for high performance/compatibility.
  */
 export const exportAudio = async (
     buffer: AudioBuffer,
     format: ExportFormat,
     audioContext: AudioContext
 ): Promise<Blob> => {
+    // 1. WAV is native and fast
     if (format === 'wav') {
         return bufferToWave(buffer, buffer.length);
     }
 
-    if (format === 'mp3') {
-        return bufferToMp3(buffer);
-    }
-
-    // Fallback for WebM / MP4 via MediaRecorder (Playback-based)
-    const dest = audioContext.createMediaStreamDestination();
-    const source = audioContext.createBufferSource();
-    source.buffer = buffer;
-    source.connect(dest);
-
-    // Determine mimeType
-    let mimeType = 'audio/webm';
-    if (format === 'mp4' && MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4';
-    } else if (format === 'mp4' && MediaRecorder.isTypeSupported('audio/webm')) {
-        console.warn("MP4 not supported natively, falling back to WebM container");
-        mimeType = 'audio/webm';
-    }
-
-    const recorder = new MediaRecorder(dest.stream, { mimeType });
-    const chunks: Blob[] = [];
-
-    return new Promise((resolve, reject) => {
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
-        };
-
-        recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: mimeType });
-            resolve(blob);
-        };
-
-        recorder.onerror = (e) => reject(e);
-
-        recorder.start();
-        source.start();
+    // 2. Try FFmpeg for MP3, MP4, WebM
+    try {
+        const ffmpeg = await loadFFmpeg();
         
-        // Stop recording when playback finishes
-        source.onended = () => {
-            recorder.stop();
-        };
-    });
+        // Convert AudioBuffer to WAV Blob first (as input for FFmpeg)
+        const wavBlob = bufferToWave(buffer, buffer.length);
+        const inputName = 'input.wav';
+        const outputName = `output.${format}`;
+        
+        await ffmpeg.writeFile(inputName, await fetchFile(wavBlob));
+        
+        const args = ['-i', inputName];
+        
+        if (format === 'mp3') {
+            args.push('-b:a', '128k');
+        } else if (format === 'mp4') {
+            args.push('-c:a', 'aac', '-b:a', '192k', '-strict', 'experimental');
+        } else if (format === 'webm') {
+            args.push('-c:a', 'libvorbis', '-b:a', '128k');
+        }
+        
+        args.push(outputName);
+        
+        await ffmpeg.exec(args);
+        
+        const data = await ffmpeg.readFile(outputName);
+        
+        // Cleanup
+        await ffmpeg.deleteFile(inputName);
+        await ffmpeg.deleteFile(outputName);
+        
+        let mimeType = '';
+        if (format === 'mp3') mimeType = 'audio/mp3';
+        if (format === 'mp4') mimeType = 'audio/mp4';
+        if (format === 'webm') mimeType = 'audio/webm';
+
+        return new Blob([data], { type: mimeType });
+
+    } catch (error) {
+        console.warn("FFmpeg conversion failed, trying fallback...", error);
+        
+        // 3. Fallback for WebM/MP4 (MediaRecorder)
+        // MP3 cannot be done via MediaRecorder.
+        if (format === 'mp3') {
+            throw new Error("MP3 export failed. FFmpeg could not be loaded.");
+        }
+
+        const dest = audioContext.createMediaStreamDestination();
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(dest);
+
+        let mimeType = 'audio/webm';
+        if (format === 'mp4' && MediaRecorder.isTypeSupported('audio/mp4')) {
+            mimeType = 'audio/mp4';
+        }
+
+        const recorder = new MediaRecorder(dest.stream, { mimeType });
+        const chunks: Blob[] = [];
+
+        return new Promise((resolve, reject) => {
+            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.onstop = () => { resolve(new Blob(chunks, { type: mimeType })); };
+            recorder.onerror = reject;
+            recorder.start();
+            source.start();
+            source.onended = () => recorder.stop();
+        });
+    }
 };

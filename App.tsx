@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Activity, Plus, Music, Download, Settings, FileAudio } from 'lucide-react';
 import WaveformEditor, { WaveformEditorRef } from './components/WaveformEditor';
-import { decodeAudio, cutAudioRegion, extractAudioRegion, blobToBase64, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects, mixAllTracks, exportAudio } from './utils/audioUtils';
+import { decodeAudio, cutAudioRegion, extractAudioRegion, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects, mixAllTracks, exportAudio } from './utils/audioUtils';
 import { Track, ChannelMode, ExportFormat } from './types';
 
 const WORKSPACE_PADDING_SECONDS = 300; 

@@ -1,6 +1,6 @@
-# 🎵 AudioStudio AI
+# 🎵 AudioStudio
 
-**AudioStudio AI** est une Station de Travail Audio Numérique (DAW) moderne et performante fonctionnant entièrement dans le navigateur. Elle combine des outils d'édition audio de précision (couper, copier, coller, mixer) avec la puissance de l'intelligence artificielle **Google Gemini 2.5** pour l'analyse sémantique du son.
+**AudioStudio** est une Station de Travail Audio Numérique (DAW) moderne et ultra-performante fonctionnant entièrement dans le navigateur. Elle offre des outils d'édition audio de précision (couper, copier, coller, mixer, enregistrer) avec une interface fluide et réactive.
 
 ---
 
@@ -30,13 +30,6 @@
   - **Écrasement (Overwrite) :** Remplace une région sélectionnée par le nouvel enregistrement.
   - **Remplacement de Canal :** Possibilité de faire du doublage uniquement sur l'oreille gauche ou droite.
 
-### 🧠 Intelligence Artificielle (Google Gemini)
-Intégration native de l'API Gemini 2.5 Flash pour analyser des segments audio sélectionnés :
-- **Transcription :** Conversion précise de la parole en texte.
-- **Résumé :** Synthèse automatique du contenu audio.
-- **Analyse de Sentiment :** Détection du ton émotionnel.
-- **Extraction de Mots-clés :** Identification des sujets principaux.
-
 ### 💾 Exportation & Formats
 - **Mixage Final :** Fusion de toutes les pistes actives avec gestion automatique des volumes (limiteur).
 - **Formats Supportés :**
@@ -54,7 +47,6 @@ Ce projet est construit avec des technologies web modernes :
 - **Frontend :** React 19, TypeScript, Tailwind CSS.
 - **Moteur Audio :** Web Audio API natif + WaveSurfer.js (v7) pour la visualisation.
 - **Traitement Audio :** Algorithmes personnalisés (DSP) pour le mixage, le découpage et l'encodage WAV bas niveau.
-- **IA :** Google GenAI SDK (`@google/genai`).
 - **Encodage Externe :**
   - `ffmpeg.wasm` (Conversion MP4/WebM haute performance).
   - `lamejs` (Encodage MP3).
@@ -79,8 +71,8 @@ Pour une productivité maximale :
 
 1. **Cloner le projet**
    ```bash
-   git clone https://github.com/votre-user/audiostudio-ai.git
-   cd audiostudio-ai
+   git clone https://github.com/votre-user/audiostudio.git
+   cd audiostudio
    ```
 
 2. **Installer les dépendances**
@@ -89,13 +81,7 @@ Pour une productivité maximale :
    npm install
    ```
 
-3. **Configuration de l'API Key**
-   Créez un fichier `.env` à la racine :
-   ```env
-   API_KEY=votre_clé_google_gemini_ici
-   ```
-
-4. **Lancer le serveur de développement**
+3. **Lancer le serveur de développement**
    ```bash
    npm start
    # ou
@@ -110,6 +96,7 @@ L'application contourne les limitations habituelles des éditeurs web :
 1. **Pas de re-téléchargement :** Contrairement aux implémentations WaveSurfer classiques, nous ne rechargeons pas le fichier via URL à chaque coupe. Nous injectons directement les données brutes (`AudioBuffer.getChannelData`) dans le visualiseur.
 2. **Synchronisation :** Les calculs audio (mixage, coupe) et le rendu visuel sont découplés mais synchronisés via des Refs React pour éviter les effets de clignotement.
 3. **Sécurité Mémoire :** Gestion stricte des `Blobs` et des URL objets pour éviter les fuites de mémoire lors de longues sessions d'édition.
+4. **Optimisation Graphique :** Rendu à densité de pixels réduite (`pixelRatio: 1`) et désactivation de l'auto-centrage pour garantir une fluidité parfaite (60fps) même avec de nombreuses pistes.
 
 ---
 
