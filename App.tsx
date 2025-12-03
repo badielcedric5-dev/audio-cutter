@@ -390,9 +390,10 @@ function App() {
         a.download = `projet_audio_${new Date().toISOString().slice(0,10)}.${ext}`;
         a.click();
         URL.revokeObjectURL(url);
-    } catch(e) {
+    } catch(e: any) {
         console.error("Export failed", e);
-        alert("L'exportation a échoué.");
+        // User friendly error message
+        alert("Erreur lors de l'exportation :\n" + (e.message || "Une erreur inconnue est survenue."));
     } finally {
         setIsProcessing(false);
         setIsExporting(false);
@@ -443,7 +444,7 @@ function App() {
                 <Activity className="text-white h-6 w-6" />
             </div>
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
-              AudioStudio AI
+              AudioStudio
             </h1>
           </div>
           <div className="flex items-center gap-4">

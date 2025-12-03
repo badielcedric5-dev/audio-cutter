@@ -580,7 +580,8 @@ export const exportAudio = async (
         const args = ['-i', inputName];
         
         if (format === 'mp3') {
-            args.push('-b:a', '128k');
+            // High quality MP3
+            args.push('-c:a', 'libmp3lame', '-q:a', '2');
         } else if (format === 'mp4') {
             args.push('-c:a', 'aac', '-b:a', '192k', '-strict', 'experimental');
         } else if (format === 'webm') {
@@ -610,7 +611,7 @@ export const exportAudio = async (
         // 3. Fallback for WebM/MP4 (MediaRecorder)
         // MP3 cannot be done via MediaRecorder.
         if (format === 'mp3') {
-            throw new Error("MP3 export failed. FFmpeg could not be loaded.");
+            throw new Error("L'exportation MP3 nécessite un environnement sécurisé (HTTPS + Headers COOP/COEP). Veuillez utiliser WAV ou un hébergeur compatible (Vercel/Netlify).");
         }
 
         const dest = audioContext.createMediaStreamDestination();
