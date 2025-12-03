@@ -14,9 +14,10 @@ const loadFFmpeg = async () => {
     
     // We need to load core. 
     // Using standard esm.sh URLs for the core files
+    // Updated to match package.json version 0.12.10
     await ffmpeg.load({
-        coreURL: 'https://esm.sh/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
-        wasmURL: 'https://esm.sh/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
+        coreURL: 'https://esm.sh/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js',
+        wasmURL: 'https://esm.sh/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm',
     });
     
     ffmpegInstance = ffmpeg;
