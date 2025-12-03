@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, memo } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
@@ -32,7 +32,7 @@ interface WaveformEditorProps {
     isRecording: boolean;
 }
 
-const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({ 
+const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>(({ 
     trackId,
     trackName,
     audioBlob, 
@@ -51,13 +51,14 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
     const wavesurferRef = useRef<WaveSurfer | null>(null);
     const regionsRef = useRef<RegionsPlugin | null>(null);
     const justClickedRegion = useRef(false);
+    const timeRef = useRef<HTMLSpanElement>(null);
     
     // We use a ref to track activeRegion synchronously for the restore logic
     const activeRegionRef = useRef<{start: number, end: number, id: string} | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [isReady, setIsReady] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
+    // Removed currentTime state to prevent 60fps re-renders
     const [zoom, setZoom] = useState(10);
     const [activeRegion, setActiveRegion] = useState<{start: number, end: number, id: string} | null>(null);
     const [channelMode, setChannelMode] = useState<ChannelMode>('stereo');
@@ -104,6 +105,12 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
         isPlaying
     }), [activeRegion, channelMode, isPlaying, isReady]);
 
+    const formatTime = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
     // 1. Initialize Wavesurfer ONCE
     useEffect(() => {
         if (!containerRef.current) return;
@@ -116,7 +123,7 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
             cursorColor: '#f4f4f5',
             barWidth: 2,
             barGap: 3,
-            height: 64, // Compact height (32px per channel)
+            height: 64, // Compact height
             autoScroll: true,
             minPxPerSec: zoom,
             normalize: true,
@@ -135,7 +142,13 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
             ws.zoom(zoom);
         });
 
-        ws.on('timeupdate', (time) => setCurrentTime(time));
+        // Optimization: Update DOM directly instead of triggering React Render
+        ws.on('timeupdate', (time) => {
+            if (timeRef.current) {
+                timeRef.current.innerText = formatTime(time);
+            }
+        });
+
         ws.on('play', () => setIsPlaying(true));
         ws.on('pause', () => setIsPlaying(false));
         ws.on('finish', () => setIsPlaying(false));
@@ -208,7 +221,10 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
         // Preserve current time
         const prevTime = ws.getCurrentTime();
         
-        // Load new data (this clears regions internally in wavesurfer)
+        // Explicitly clear regions to prevent memory leaks and ghosts
+        regionsRef.current?.clearRegions();
+
+        // Load new data
         ws.load(url, channelData);
 
         // Restore position and region after load
@@ -219,7 +235,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
             
             // Restore Selection if it existed
             if (savedRegion && regionsRef.current) {
-                // Add region back. This triggers 'region-created', which sets state.
                 regionsRef.current.addRegion({
                     start: savedRegion.start,
                     end: savedRegion.end,
@@ -285,12 +300,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
         }
     };
 
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
     return (
         <div 
             onClick={onFocus}
@@ -349,8 +358,9 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
                     >
                         {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
                     </button>
-                    <span className="text-[10px] text-gray-400 font-mono ml-1 w-10">
-                        {formatTime(currentTime)}
+                    {/* Direct DOM update for time to avoid re-renders */}
+                    <span ref={timeRef} className="text-[10px] text-gray-400 font-mono ml-1 w-10">
+                        0:00
                     </span>
                     
                     <div className="flex items-center gap-0.5 bg-black/20 p-0.5 rounded-lg ml-2">
@@ -486,6 +496,6 @@ const WaveformEditor = forwardRef<WaveformEditorRef, WaveformEditorProps>(({
             </div>
         </div>
     );
-});
+}));
 
 export default WaveformEditor;
