@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Activity, Plus, Music, Download, Settings, FileAudio } from 'lucide-react';
 import WaveformEditor, { WaveformEditorRef } from './components/WaveformEditor';
-import { decodeAudio, cutAudioRegion, extractAudioRegion, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects, mixAllTracks, exportAudio } from './utils/audioUtils';
+import { decodeAudio, cutAudioRegion, extractAudioRegion, concatenateAudioBuffers, insertAudioBuffer, pasteAudioToChannel, padAudioBuffer, bufferToWave, applyAudioEffects, mixAllTracks, exportAudio, ensureStereo } from './utils/audioUtils';
 import { Track, ChannelMode, ExportFormat } from './types';
 
 const WORKSPACE_PADDING_SECONDS = 300; 
@@ -128,7 +128,9 @@ function App() {
                         updateTrackBuffer(focusedTrackId, paddedBuffer);
                     }
                 } else {
-                    const paddedBuffer = padAudioBuffer(clipboardBuffer, ctx, WORKSPACE_PADDING_SECONDS);
+                    // Force stereo on paste to ensure split view
+                    const stereoClipboard = ensureStereo(clipboardBuffer, ctx);
+                    const paddedBuffer = padAudioBuffer(stereoClipboard, ctx, WORKSPACE_PADDING_SECONDS);
                     const paddedBlob = bufferToWave(paddedBuffer, paddedBuffer.length);
                     
                     const newTrack: Track = {
@@ -168,7 +170,11 @@ function App() {
       const arrayBuffer = await file.arrayBuffer();
       // DecodeAudioData automatically supports MP3, WAV, OGG, M4A, AAC, etc.
       const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
-      const paddedBuffer = padAudioBuffer(decodedBuffer, ctx, WORKSPACE_PADDING_SECONDS);
+      
+      // Force Stereo Up-mixing for visualization of mono files
+      const stereoBuffer = ensureStereo(decodedBuffer, ctx);
+
+      const paddedBuffer = padAudioBuffer(stereoBuffer, ctx, WORKSPACE_PADDING_SECONDS);
       const paddedBlob = bufferToWave(paddedBuffer, paddedBuffer.length);
 
       const newTrack: Track = {
@@ -323,6 +329,7 @@ function App() {
                           // Overwrite with recording (handling mono/stereo recording source)
                           for(let i=0; i<targetTrack.buffer.numberOfChannels; i++) {
                               const destData = newBuffer.getChannelData(i);
+                              // Safe channel access for mono recording
                               const srcData = recordedBuffer.getChannelData(i % recordedBuffer.numberOfChannels);
                               
                               // Overwrite data

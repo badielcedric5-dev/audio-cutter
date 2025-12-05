@@ -1,6 +1,2 @@
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-}
+// Ce fichier n'est plus utilisé
+export default {}

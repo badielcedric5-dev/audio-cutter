@@ -5,6 +5,7 @@ import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
 import ZoomPlugin from 'wavesurfer.js/dist/plugins/zoom.esm.js';
 import { Play, Pause, ZoomIn, ZoomOut, Trash2, PlusCircle, XCircle, Volume2, Headphones, Check, Mic, Square } from 'lucide-react';
 import { ChannelMode } from '../types';
+import { computeWaveformPeaks } from '../utils/audioUtils';
 
 export interface WaveformEditorRef {
     togglePlay: () => void;
@@ -18,8 +19,8 @@ export interface WaveformEditorRef {
 interface WaveformEditorProps {
     trackId: string;
     trackName: string;
-    audioBlob: Blob; // Used for playback source
-    audioBuffer: AudioBuffer; // Used for immediate visual rendering
+    audioBlob: Blob;
+    audioBuffer: AudioBuffer;
     onUpdateBlob: (newBlob: Blob) => void;
     onCutRegion?: (start: number, end: number, channelMode: ChannelMode) => void;
     onAppendAudio?: () => void;
@@ -32,10 +33,10 @@ interface WaveformEditorProps {
     isRecording: boolean;
 }
 
-const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>(({ 
+const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>(({
     trackId,
     trackName,
-    audioBlob, 
+    audioBlob,
     audioBuffer,
     onCutRegion,
     onAppendAudio,
@@ -52,22 +53,17 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
     const regionsRef = useRef<RegionsPlugin | null>(null);
     const justClickedRegion = useRef(false);
     const timeRef = useRef<HTMLSpanElement>(null);
-    
-    // We use a ref to track activeRegion synchronously for the restore logic
-    const activeRegionRef = useRef<{start: number, end: number, id: string} | null>(null);
+    const activeRegionRef = useRef<{ start: number; end: number; id: string } | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [isReady, setIsReady] = useState(false);
-    // Removed currentTime state to prevent 60fps re-renders
     const [zoom, setZoom] = useState(10);
-    const [activeRegion, setActiveRegion] = useState<{start: number, end: number, id: string} | null>(null);
+    const [activeRegion, setActiveRegion] = useState<{ start: number; end: number; id: string } | null>(null);
     const [channelMode, setChannelMode] = useState<ChannelMode>('stereo');
 
-    // Audio Effect States
     const [volume, setVolume] = useState(1);
     const [pan, setPan] = useState(0);
 
-    // Sync ref with state
     useEffect(() => {
         activeRegionRef.current = activeRegion;
     }, [activeRegion]);
@@ -89,21 +85,12 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
 
     useImperativeHandle(ref, () => ({
         togglePlay: handlePlayPause,
-        deleteSelectedRegion: () => {
-            handleDeleteRegion();
-        },
-        getSelectedRegion: () => {
-            if (activeRegion) {
-                return { start: activeRegion.start, end: activeRegion.end, channelMode };
-            }
-            return null;
-        },
-        getCurrentTime: () => {
-            return wavesurferRef.current?.getCurrentTime() || 0;
-        },
+        deleteSelectedRegion: () => { handleDeleteRegion(); },
+        getSelectedRegion: () => activeRegion ? { start: activeRegion.start, end: activeRegion.end, channelMode } : null,
+        getCurrentTime: () => wavesurferRef.current?.getCurrentTime() || 0,
         getChannelMode: () => channelMode,
         isPlaying
-    }), [activeRegion, channelMode, isPlaying, isReady]);
+    }), [activeRegion, channelMode, isPlaying]);
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -111,26 +98,28 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    // 1. Initialize Wavesurfer ONCE
+    // 1. INITIALISATION
     useEffect(() => {
-        if (!containerRef.current) return;
-        if (wavesurferRef.current) return; // Prevent double init
+        if (!containerRef.current || wavesurferRef.current) return;
 
         const ws = WaveSurfer.create({
             container: containerRef.current,
-            waveColor: '#8b5cf6',
-            progressColor: '#c4b5fd',
-            cursorColor: '#f4f4f5',
-            barWidth: 2,
-            barGap: 3,
-            height: 64, // Compact height
+            height: 64, // Hauteur réduite à 64px
             autoScroll: true,
-            autoCenter: false, // Performance optimization: prevents camera jumping
+            autoCenter: false,
             minPxPerSec: zoom,
             normalize: true,
-            splitChannels: true,
-            pixelRatio: 1, // Performance optimization: standard DPI rendering for speed
-            sampleRate: 8000, // Performance optimization: reduces data points to render
+            cursorColor: '#f4f4f5',
+            splitChannels: [
+                {
+                    waveColor: '#a78bfa',
+                    progressColor: '#7c3aed',
+                },
+                {
+                    waveColor: '#22d3ee',
+                    progressColor: '#0891b2',
+                }
+            ],
         });
 
         const wsRegions = ws.registerPlugin(RegionsPlugin.create());
@@ -145,11 +134,8 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
             ws.zoom(zoom);
         });
 
-        // Optimization: Update DOM directly instead of triggering React Render
         ws.on('timeupdate', (time) => {
-            if (timeRef.current) {
-                timeRef.current.innerText = formatTime(time);
-            }
+            if (timeRef.current) timeRef.current.innerText = formatTime(time);
         });
 
         ws.on('play', () => setIsPlaying(true));
@@ -166,34 +152,26 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
             setActiveRegion(null);
             setVolume(1);
             setPan(0);
-            setChannelMode('stereo'); // Reset to stereo on new click
+            setChannelMode('stereo');
         });
 
         wsRegions.on('region-created', (region) => {
-             onFocus();
-             // Remove other regions to ensure only one is active
-             wsRegions.getRegions().forEach(r => {
-                 if (r.id !== region.id) r.remove();
-             });
-             setActiveRegion({ start: region.start, end: region.end, id: region.id });
+            onFocus();
+            wsRegions.getRegions().forEach(r => { if (r.id !== region.id) r.remove(); });
+            setActiveRegion({ start: region.start, end: region.end, id: region.id });
         });
 
         wsRegions.on('region-updated', (region) => {
             onFocus();
             setActiveRegion({ start: region.start, end: region.end, id: region.id });
         });
-        
+
         wsRegions.on('region-clicked', (region, e) => {
             e.stopPropagation();
             justClickedRegion.current = true;
             onFocus();
             setActiveRegion({ start: region.start, end: region.end, id: region.id });
             setTimeout(() => { justClickedRegion.current = false; }, 100);
-        });
-
-        wsRegions.on('region-removed', (region) => {
-            // Only clear active region if it matches the removed one
-            setActiveRegion(prev => (prev?.id === region.id ? null : prev));
         });
 
         wsRegions.enableDragSelection({ color: 'rgba(139, 92, 246, 0.3)' });
@@ -203,83 +181,85 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
             wavesurferRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Run once on mount
+    }, []);
 
-    // 2. Handle Audio Buffer Updates (The "Instant Update" logic)
+    // 2. OPTIMIZED UPDATE
     useEffect(() => {
         if (!wavesurferRef.current || !audioBuffer) return;
 
         const ws = wavesurferRef.current;
-        const url = URL.createObjectURL(audioBlob);
-
-        // Capture current active region (from ref) BEFORE it gets wiped by ws.load
+        const currentTime = ws.getCurrentTime();
         const savedRegion = activeRegionRef.current;
 
-        // Prepare raw channel data
-        const channelData = [];
-        for(let i=0; i < audioBuffer.numberOfChannels; i++) {
-            channelData.push(audioBuffer.getChannelData(i));
-        }
-        
-        // Preserve current time
-        const prevTime = ws.getCurrentTime();
-        
-        // Explicitly clear regions to prevent memory leaks and ghosts
         regionsRef.current?.clearRegions();
 
-        // Load new data
-        ws.load(url, channelData);
+        // Use URL for playback source
+        const url = URL.createObjectURL(audioBlob);
+        
+        // Compute simplified peaks (e.g. 1000 samples per second)
+        // This is MUCH faster for rendering than passing the full buffer
+        const peaks = computeWaveformPeaks(audioBuffer, 1000);
+        
+        ws.load(url, peaks, audioBuffer.duration);
 
-        // Restore position and region after load
-        ws.once('ready', () => {
-            if (prevTime > 0 && prevTime < audioBuffer.duration) {
-                ws.setTime(prevTime);
+        const onReady = () => {
+            ws.zoom(zoom);
+
+            if (currentTime > 0 && currentTime <= audioBuffer.duration) {
+                ws.setTime(currentTime);
             }
-            
-            // Restore Selection if it existed
+
             if (savedRegion && regionsRef.current) {
+                const newEnd = Math.min(savedRegion.end, audioBuffer.duration);
                 regionsRef.current.addRegion({
+                    id: `region-${Date.now()}`,
                     start: savedRegion.start,
-                    end: savedRegion.end,
-                    id: savedRegion.id,
-                    color: getRegionColor(channelMode)
+                    end: newEnd,
+                    color: getRegionColor(channelMode),
+                    drag: true,
+                    resize: true,
                 });
+                setActiveRegion({ start: savedRegion.start, end: newEnd, id: `region-${Date.now()}` });
             }
-        });
+        };
+
+        ws.once('ready', onReady);
 
         return () => {
+            ws.un('ready', onReady);
             URL.revokeObjectURL(url);
         };
-    }, [audioBuffer, audioBlob]); // Re-run when buffer changes
+    // Depend ONLY on audioBuffer to avoid loops and redundant reloads
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [audioBuffer]); 
 
+    // Zoom update
     useEffect(() => {
         if (wavesurferRef.current && isReady) {
             wavesurferRef.current.zoom(zoom);
         }
     }, [zoom, isReady]);
 
-    // Update Region Color based on Channel Mode
     useEffect(() => {
         if (activeRegion && regionsRef.current) {
             const region = regionsRef.current.getRegions().find(r => r.id === activeRegion.id);
-            if (region) {
-                region.setOptions({ color: getRegionColor(channelMode) });
-            }
+            region?.setOptions({ color: getRegionColor(channelMode) });
         }
     }, [channelMode, activeRegion]);
 
     const getRegionColor = (mode: ChannelMode) => {
-        if (mode === 'left') return 'rgba(239, 68, 68, 0.3)';
-        if (mode === 'right') return 'rgba(6, 182, 212, 0.3)';
-        return 'rgba(139, 92, 246, 0.3)'; // stereo
+        switch (mode) {
+            case 'left': return 'rgba(239, 68, 68, 0.3)';
+            case 'right': return 'rgba(6, 182, 212, 0.3)';
+            default: return 'rgba(139, 92, 246, 0.3)';
+        }
     };
 
     const handleDeleteRegion = () => {
         if (activeRegion && onCutRegion) {
             onCutRegion(activeRegion.start, activeRegion.end, channelMode);
-            activeRegionRef.current = null; 
-            regionsRef.current?.clearRegions();
             setActiveRegion(null);
+            regionsRef.current?.clearRegions();
         }
     };
 
@@ -297,8 +277,7 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
             if (activeRegion) {
                 onRecordToggle(activeRegion.start, activeRegion.end, channelMode);
             } else {
-                const currentTime = wavesurferRef.current?.getCurrentTime() || 0;
-                onRecordToggle(currentTime, null, channelMode);
+                onRecordToggle(wavesurferRef.current?.getCurrentTime() || 0, null, channelMode);
             }
         }
     };
@@ -324,10 +303,7 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
                 </div>
                 {onRemoveTrack && (
                     <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveTrack();
-                        }}
+                        onClick={(e) => { e.stopPropagation(); onRemoveTrack(); }}
                         className="text-gray-400 hover:text-red-400 hover:bg-red-500/10 p-1 rounded transition-colors"
                         title="Supprimer la piste"
                     >
@@ -338,8 +314,9 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
 
             {/* Waveform */}
             <div className="relative group min-h-[64px] bg-black/40 rounded-lg overflow-hidden border border-white/5">
-                <div className="absolute left-1 top-1 text-[8px] text-red-400 font-bold z-10 pointer-events-none opacity-50">L</div>
-                <div className="absolute left-1 bottom-1 text-[8px] text-cyan-400 font-bold z-10 pointer-events-none opacity-50">R</div>
+                <div className="absolute left-1 top-1 text-[9px] text-violet-300 font-bold z-10 pointer-events-none bg-black/60 px-1.5 py-0.5 rounded shadow-sm border border-violet-500/30">L (Gauche)</div>
+                <div className="absolute left-1 bottom-1 text-[9px] text-cyan-300 font-bold z-10 pointer-events-none bg-black/60 px-1.5 py-0.5 rounded shadow-sm border border-cyan-500/30">R (Droite)</div>
+                <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-white/10 z-10 pointer-events-none"></div>
 
                 <div id={`waveform-${trackId}`} ref={containerRef} className="w-full" />
                 {(!isReady || isProcessing) && (
@@ -361,7 +338,6 @@ const WaveformEditor = memo(forwardRef<WaveformEditorRef, WaveformEditorProps>((
                     >
                         {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
                     </button>
-                    {/* Direct DOM update for time to avoid re-renders */}
                     <span ref={timeRef} className="text-[10px] text-gray-400 font-mono ml-1 w-10">
                         0:00
                     </span>

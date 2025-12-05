@@ -5,7 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AudioStudio - Éditeur Audio Web</title>
     <meta name="description" content="Studio d'édition audio gratuit dans le navigateur. Coupez, mixez et enregistrez vos pistes audio en toute simplicité. Export WAV, MP3, MP4." />
-  <script type="importmap">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              background: '#09090b',
+              surface: '#18181b',
+              primary: '#8b5cf6',
+              secondary: '#3f3f46',
+            }
+          },
+        },
+      }
+    </script>
+<script type="importmap">
 {
   "imports": {
     "react": "https://aistudiocdn.com/react@^19.2.0",

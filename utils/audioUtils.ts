@@ -90,13 +90,49 @@ function writeString(view: DataView, offset: number, string: string) {
  * Helper to ensure a buffer is Stereo (2 channels).
  * If Mono, it duplicates the channel to L and R.
  */
-const ensureStereo = (buffer: AudioBuffer, audioContext: AudioContext): AudioBuffer => {
+export const ensureStereo = (buffer: AudioBuffer, audioContext: AudioContext): AudioBuffer => {
     if (buffer.numberOfChannels >= 2) return buffer;
 
     const stereoBuffer = audioContext.createBuffer(2, buffer.length, buffer.sampleRate);
     stereoBuffer.getChannelData(0).set(buffer.getChannelData(0));
     stereoBuffer.getChannelData(1).set(buffer.getChannelData(0)); // Duplicate to Right
     return stereoBuffer;
+};
+
+/**
+ * Computes simplified peaks for waveform rendering.
+ * Drastically reduces render time/RAM usage by downsampling.
+ */
+export const computeWaveformPeaks = (buffer: AudioBuffer, peaksPerSecond: number = 800): Float32Array[] => {
+    const channels = buffer.numberOfChannels;
+    const duration = buffer.duration;
+    const totalPeaks = Math.floor(duration * peaksPerSecond);
+    
+    // Safety check
+    if (totalPeaks <= 0 || !buffer) return [new Float32Array(0)];
+
+    const outputPeaks: Float32Array[] = [];
+
+    for (let c = 0; c < channels; c++) {
+        const channelData = buffer.getChannelData(c);
+        const peaks = new Float32Array(totalPeaks);
+        const step = Math.floor(channelData.length / totalPeaks) || 1;
+
+        for (let i = 0; i < totalPeaks; i++) {
+            const start = i * step;
+            // For visualization, finding the max in the window is sufficient and fast
+            let max = 0;
+            const end = Math.min(start + step, channelData.length);
+            
+            for (let j = start; j < end; j++) {
+                const val = Math.abs(channelData[j]);
+                if (val > max) max = val;
+            }
+            peaks[i] = max;
+        }
+        outputPeaks.push(peaks);
+    }
+    return outputPeaks;
 };
 
 /**
